@@ -1,0 +1,150 @@
+---
+title: "hw6"
+author: "Kexin Sun"
+date: "12/8/2020"
+output: github_document
+---
+
+
+```{r}
+
+library(tidyverse)
+library(readxl)
+library(patchwork)
+
+
+knitr::opts_chunk$set(
+  fig.height = 6,
+  fig.width = 8,
+  message = F,
+  echo = T,
+  warning = F
+)
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis",
+  digits = 3
+)
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+
+```
+
+
+## Problem 3
+
+```{r}
+
+weather_df =
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"),
+    date_min = "2017-01-01",
+    date_max = "2017-12-31"
+  ) %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10
+  ) %>%
+  select(name, id, everything())
+```
+
+Get the distribution plot:
+
+```{r}
+weather_df %>%
+  ggplot(aes(x = tmin, y = tmax)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm")
+```
+
+
+Bootstrap:
+
+```{r}
+set.seed(1)
+weather_bootstrap =
+  modelr::bootstrap(weather_df,
+                    n = 5000,
+                    id = "id") %>%
+  mutate(
+    strap = map(strap, as_tibble),
+    md =
+      map(.x = strap,
+          ~ lm(tmax ~ tmin, data = .x)),
+    r_square =
+      map2_dbl(.x = md,
+               .y = strap,
+               ~ modelr::rsquare(.x, .y)),
+    md = map(md, broom::tidy)
+  ) %>%
+  unnest(md) %>%
+  select(id, term, estimate, std_error = std.error, r_square)
+
+weather_bootstrap %>% head() %>% knitr::kable()
+```
+
+
+The 95% confidence interval of r̂ squared and  log(β̂ 0∗ β̂ 1).
+
+
+```{r boostrap_result}
+weather_bootstrap %>%
+  distinct(id, r_square) %>%
+  summarise(lower = quantile(r_square, 0.025),
+            upper = quantile(r_square, 0.975)) %>%
+  knitr::kable()
+
+weather_bootstrap %>%
+  select(id, term, estimate) %>%
+  pivot_wider(names_from = term,
+              values_from = estimate
+              ) %>%
+  janitor::clean_names() %>%
+  mutate(log_beta =log(tmin * intercept)) %>%
+  summarise(lower = quantile(log_beta, 0.025),
+            upper = quantile(log_beta, 0.975)
+            ) %>%
+  knitr::kable()
+
+```
+The 95% confidence interval for r̂ squared is (0.894, 0.927)
+
+The 95% confidence interval for log(Beta1*Beta2) is (1.97, 2.06)
+
+
+
+The distribution plot:
+
+```{r}
+weather_bootstrap %>%
+  distinct(id, r_square) %>%
+  ggplot(aes(x = r_square)) +
+  geom_density()+
+  labs(
+    title = "Distribution of R^2"
+  )
+weather_bootstrap %>%
+  select(id, term, estimate) %>%
+  pivot_wider(names_from = term,
+              values_from = estimate) %>%
+  janitor::clean_names() %>%
+  mutate(log_beta =
+           log(tmin * intercept)) %>%
+  ggplot(aes(x = log_beta)) +
+  geom_density() +
+  labs(
+    title = "Distribution of log( β̂ 0∗β̂1)"
+  )
+```
+
+
+
+The distribution of r̂ squared is approximately normal and follows the Central Limit Theroem. The distribution centered around 0.915
+ 
+The distribution of log(beta0hat and the beta1hat) is approximately normal and follows the Central Limit Theroem. The distribution centered around 2.02
+
+
+
