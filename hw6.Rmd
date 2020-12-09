@@ -11,7 +11,10 @@ output: github_document
 library(tidyverse)
 library(readxl)
 library(patchwork)
-
+library(ggplot2)
+library(modelr)
+library(p8105.datasets)
+library(mgcv)
 
 knitr::opts_chunk$set(
   fig.height = 6,
@@ -31,6 +34,158 @@ scale_fill_discrete = scale_fill_viridis_d
 
 ```
 
+## Problem 2
+
+Load the data
+
+```{r}
+birthweight =
+  read_csv(here::here("data/birthweight.csv")) %>%
+  janitor::clean_names() %>%
+  mutate(
+    across(
+      c("frace", "mrace"),
+      ~ case_when(
+        .x == 1 ~ "White",
+        .x == 2 ~ "Black",
+        .x == 3 ~ "Asian",
+        .x == 4 ~ "Puero Rican",
+        .x == 8 ~ "Other",
+        .x == 9 ~ "Unknown"
+      )
+    ),
+    across(where(is.character), as.factor),
+    malform = case_when(malform == 0 ~ "absent",
+                        malform == 1 ~ "present"),
+    malform = as.factor(malform),
+    babysex = case_when(babysex == 1 ~ "male",
+                        babysex == 2 ~ "female") %>% as.factor()
+  )
+birthweight %>% skimr::skim_without_charts()
+```
+
+
+Fit the model. `babysexmale`, `bhead`, `blength`, `delwt`, `gaweeks` and `wtgain` are predictors.  
+```{r}
+model_df =
+  birthweight %>%
+  select(bwt, babysex, bhead, blength, delwt, gaweeks, wtgain)
+
+mul_model = lm(bwt ~ ., data = model_df)
+summary(mul_model)
+```
+
+```{r}
+step(mul_model, direction = "backward")
+```
+
+Model 1 
+```{r}
+model1 <- lm(bwt ~ ., data = model_df)
+summary(model1)
+model1 %>% 
+  broom::tidy() %>% 
+  select(-std.error, -statistic) %>% 
+  knitr::kable()
+```
+
+```{r}
+model_df =
+  model_df %>% 
+  modelr::add_predictions(model1) %>% 
+  modelr::add_residuals(model1)
+model_df
+```
+
+Most dots are distributed around 0, but there are also some outliers.
+```{r}
+model_df %>% 
+  ggplot(aes(x = pred, y = resid)) +
+  geom_point(alpha = 0.5) +
+  labs(
+    title = "Predictors vs. Residuals Plot",
+    x = "Predictors",
+    y = "Residuals"
+  )
+```
+
+The density plot follows a normal distribution and centered around 0.
+```{r}
+model_df %>% 
+  ggplot(aes(x = resid)) +
+  geom_density() +
+  labs(
+    title = "Residuals plot",
+    x = "Residuals",
+    y = "Density"
+  )
+```
+
+
+Create other two models
+```{r}
+model2 =
+  lm(bwt ~ blength + gaweeks, data = birthweight)
+summary(model2)
+
+model2 %>% 
+  broom::tidy() %>% 
+  select(-std.error, -statistic) %>% 
+  knitr::kable()
+```
+
+```{r}
+model3 =
+  lm(bwt ~ babysex * bhead * blength, data = birthweight)
+summary(model3)
+
+model3 %>% 
+  broom::tidy() %>% 
+  select(-std.error, -statistic) %>% 
+  knitr::kable()
+```
+
+Cross Validation
+```{r}
+cv =
+  crossv_mc(birthweight, 100) %>% 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)
+  )
+cv_birthweight =
+  cv %>% 
+    mutate(
+        model1 = map(train, ~lm(bwt ~ babysex + bhead + blength + delwt + gaweeks + wtgain, data = .x)),
+        model2 = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+        model3 = map(train, ~lm(bwt ~ bhead * blength * babysex, data = .x))
+    ) %>% 
+    mutate(
+        rmse1 = map2_dbl(model1, test, ~rmse(model = .x, data = .y)),
+        rmse2 = map2_dbl(model2, test, ~rmse(model = .x, data = .y)),
+        rmse3 = map2_dbl(model3, test, ~rmse(model = .x, data = .y))
+    )
+```
+
+
+As we can see, Model1 has the lowest RMSE, which indicates that it fits the data best. 
+```{r}
+cv_birthweight %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model",
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) %>% 
+  ggplot(aes(x = model, y = rmse)) +
+  geom_violin() +
+  labs(
+    title = "Comparison Between Three Models",
+    x = "Model",
+    y = "rmse"
+  )
+```
 
 ## Problem 3
 
